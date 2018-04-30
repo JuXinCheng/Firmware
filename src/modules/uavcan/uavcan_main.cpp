@@ -86,9 +86,9 @@ UavcanNode::UavcanNode(uavcan::ICanDriver &can_driver, uavcan::ISystemClock &sys
 	_time_sync_master(_node),
 	_time_sync_slave(_node),
 	_node_status_monitor(_node),
+	_perf_control_latency(perf_alloc(PC_ELAPSED, "uavcan control latency")),
 	_master_timer(_node),
 	_setget_response(0)
-
 {
 	_task_should_exit = false;
 	_fw_server_action = None;
@@ -162,6 +162,8 @@ UavcanNode::~UavcanNode()
 	if (_mixers != nullptr) {
 		delete _mixers;
 	}
+
+	perf_free(_perf_control_latency);
 }
 
 int UavcanNode::getHardwareVersion(uavcan::protocol::HardwareVersion &hwver)
@@ -966,6 +968,17 @@ int UavcanNode::run()
 			// Output to the bus
 			_outputs.timestamp = hrt_absolute_time();
 			_esc_controller.update_outputs(_outputs.output, _outputs.noutputs);
+
+			// use first valid timestamp_sample for latenccy tracking
+			for (uint8_t i = 0; i < actuator_controls_s::NUM_ACTUATOR_CONTROL_GROUPS; i++) {
+				const bool required = _groups_required & (1 << i);
+				const hrt_abstime &ts = _controls[i].timestamp_sample;
+
+				if (required && (ts > 0)) {
+					perf_set_elapsed(_perf_control_latency, hrt_elapsed_time(&ts));
+					break;
+				}
+			}
 		}
 
 
